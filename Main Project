@@ -1,0 +1,187 @@
+/*
+
+Cleaning Data in SQL Queries
+Author: Kevin Teresi
+Shout out to Alex the Analyst for inspiring, and for creating this project!
+
+*/
+
+select * 
+from public.”nashville”
+
+
+-- Standardize Date Format
+
+update public."nashville"
+set saledate=cast(saledate as date)
+
+-- If first code doesn’t update data, try following code.
+
+alter table public."nashville"
+add saledateconverted date
+
+select saledateconverted 
+from public."nashville"
+
+
+
+
+
+-- Populate Property Address Data
+
+select *
+from public."nashville"
+where propertyaddress is null
+
+select a.parcelid, a.propertyaddress, b.propertyaddress
+from public."nashville" a
+JOIN public."nashville" b
+	on a.parcelid = b.parcelid
+	and a.uniqueid <> b.uniqueid
+where a.propertyaddress is null
+
+-- Following code fills in property address where it would otherwise be null
+-- We will be using duplicates on parcelid and unique values from uniqueid to make imaginary join
+-- The coalesce function allows us to replace the null (from a) with the value from b.
+update public."nashville"
+set propertyaddress = coalesce(a.propertyaddress, b.propertyaddress)
+from public."nashville" a
+JOIN public."nashville" b
+	on a.parcelid = b.parcelid
+	and a.uniqueid <> b.uniqueid
+where a.propertyaddress is null
+
+
+
+
+
+
+-- Breaking out Address into Individual Columns (Address, City, State)
+
+select propertyaddress
+from public."nashville"
+
+--following code splits propertyaddress into 2 strings, separated by comma.
+-- this allows us to separate the address from the city.
+select 
+--left(propertyaddress, strpos(propertyaddress, ',') - 1 ) as address
+split_part(propertyaddress, ',', 1) as address1,
+split_part(propertyaddress, ',', 2) as address2
+from public."nashville"
+
+
+alter table public."nashville"
+add column propertysplitaddress text;
+
+update public."nashville"
+set propertysplitaddress=split_part(propertyaddress, ',', 1)
+
+alter table public."nashville"
+add column propertysplitcity text;
+
+update public."nashville"
+set propertysplitcity=split_part(propertyaddress, ',', 2)
+
+
+
+
+-- We would like to do the same as above with owneraddress, but now we have added element (state)
+
+alter table public."nashville"
+add column ownersplitaddress text;
+
+update public."nashville"
+set ownersplitaddress=split_part(owneraddress, ',', 1)
+
+alter table public."nashville"
+add column ownersplitcity text;
+
+update public."nashville"
+set ownersplitcity=split_part(owneraddress, ',', 2)
+
+alter table public."nashville"
+add column ownersplitstate text;
+
+update public."nashville"
+set ownersplitstate=split_part(owneraddress, ',', 3)
+
+
+
+
+
+
+
+
+
+
+-- Change Y and N to Yes and No in “Sold as Vacant” field
+
+select distinct(soldasvacant), count(soldasvacant)
+from public."nashville"
+group by soldasvacant
+
+
+select soldasvacant
+, Case when soldasvacant = 'Y' then 'Yes'
+	   when soldasvacant = 'N' then 'No'
+	   else soldasvacant
+	   end
+from public."nashville"
+
+
+update public."nashville"
+set soldasvacant = Case when soldasvacant = 'Y' then 'Yes'
+	   when soldasvacant = 'N' then 'No'
+	   else soldasvacant
+	   end
+
+
+
+
+
+
+
+
+
+-- Remove Duplicates
+
+-- in SQL
+with rownumcte as (
+select *, row_number() over (
+	partition by parcelid,
+				 propertyaddress,
+				 saleprice,
+				 saledate,
+				 legalreference
+				 ORDER BY parcelid) as row_num
+
+from public."nashville"
+--order by parcelid
+)
+delete
+from rownumcte
+where row_num > 1
+
+
+-- IN POSTGRESQL
+delete from public."nashville"
+where uniqueid in (
+    select
+        uniqueid
+    from (
+        select
+            uniqueid,
+            row_number() over w as rnum
+        from public."nashville"
+        window w as (
+            partition by propertyaddress, saleprice, saledate, legalreference
+            order by parcelid
+        )
+    ) t
+where t.rnum > 1);
+
+
+-- Delete Unused Columns
+
+alter table public.”nashville”
+drop column owneraddress, taxdistrict, propertyaddress,  saledate
